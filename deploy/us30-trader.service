@@ -1,0 +1,27 @@
+[Unit]
+Description=US30 Trader (ejecución Capital.com, Daily bias / 1H entry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Mismo usuario de servicio que los bots de alertas — nunca root.
+User=alerts
+Group=alerts
+WorkingDirectory=/opt/us30_trader
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Reusa el venv de us30_alerts: mismas deps que el engine de señal (pandas/pydantic/
+# requests). El código del trader es stdlib. signal_source importa /opt/us30_alerts/src
+# (solo lectura). El host de Capital.com lo fija CAPITAL_ENVIRONMENT en el .env (=demo).
+ExecStart=/opt/us30_alerts/.venv/bin/python /opt/us30_trader/run_trader.py
+Restart=on-failure
+RestartSec=10
+# Hardening (igual que us30-alerts): FS read-only salvo el state del trader.
+ProtectSystem=strict
+ReadWritePaths=/opt/us30_trader/state
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

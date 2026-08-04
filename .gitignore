@@ -1,0 +1,15 @@
+# Secrets — NUNCA subir
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# State local (dealId <-> alert_id, BE)
+state/
+*.sqlite
+*.db
+
+# macOS
+.DS_Store

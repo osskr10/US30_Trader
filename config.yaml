@@ -1,0 +1,41 @@
+# Config del us30_trader. Los secrets van en .env (no acá).
+# La ventana operativa, timeframes y reglas de estrategia se HEREDAN del engine de
+# us30_alerts (via signal_source) — acá solo va lo específico de la EJECUCIÓN.
+
+execution:
+  broker: capitalcom
+  environment: demo          # informativo; el host real lo fija CAPITAL_ENVIRONMENT en .env
+  epic: US30                 # confirmado operable en demo (2026-08-03)
+  mode: practice             # shadow | practice | live  (practice/live = envía órdenes reales)
+  # Guarda dura: el runner combinado exige que el .env sea 'demo' salvo que allow_live_env=true.
+  # Evita que un mode=live golpee la cuenta real por accidente. Cambiar a true a propósito.
+  allow_live_env: false
+
+  risk_pct: 4.0              # % del balance arriesgado por trade. INTERÉS COMPUESTO:
+                            # se recalcula sobre el balance ACTUAL en cada trade
+                            # (cuenta $1200 → 1% de 1200; cuenta $700 → 1% de 700).
+  rr_target: 2.0             # 1:2 (TP = entry ± 2R, sobre la distancia real de SL)
+  sl_buffer_points: 10       # respiro del SL: lo aleja 10 pts del min/max de la vela
+                            # (LONG: SL abajo; SHORT: SL arriba) para que el spread no lo toque.
+                            # El size se recalcula → el riesgo sigue siendo risk_pct exacto.
+
+  break_even:
+    enabled: true
+    trigger_r: 1.0           # BE a 1:1
+    buffer_points: 5         # colchón sobre entry al mover el SL
+
+  # Guardas
+  max_spread_points: 15
+  max_slippage_points: 10    # 'deviation' tolerada en el market (uso futuro)
+  min_units_action: skip     # si size < min_deal_size → skip (no forzar)
+  max_concurrent_positions: 1
+  max_daily_loss_pct: 3.0    # kill switch de pérdida diaria
+
+  # Specs del instrumento US30 (verificadas con orden real en demo 2026-08-03).
+  instrument:
+    value_per_point: 1.0     # CONFIRMADO: upl=-0.0027 con size 0.001 y ~2.7pts en contra
+    size_increment: 0.001
+    min_deal_size: 0.001
+    max_deal_size: 500.0
+    margin_factor: 0.01      # REAL: apalancamiento 100 en la posición (no el 5% del market detail)
+    price_step: 0.1
