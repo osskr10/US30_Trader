@@ -9,9 +9,11 @@ o con pytest:      cd us30_trader && python3 -m pytest tests/ -q
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import execution.capital_client as cc  # noqa: E402
 from execution.capital_client import (  # noqa: E402
     CapitalClient, CapitalConfig, CapitalError, ExecutionDisabled, _load_env,
 )
@@ -130,6 +132,83 @@ def test_execution_habilitada_no_bloquea_por_guarda():
     except Exception:
         pass  # error de red esperado: la guarda ya pasó
     assert not got_execution_disabled
+
+
+def _client():
+    cfg = CapitalConfig(api_key="k", identifier="i", password="p", environment="demo")
+    return CapitalClient(cfg)
+
+
+def test_login_reintenta_ante_too_many_requests():
+    c = _client()
+    calls = {"n": 0}
+
+    def fake_raw(method, url, headers, body=None, net_retries=2):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 429, {}, {"errorCode": "error.too-many.requests"}
+        return 200, {"CST": "C", "X-SECURITY-TOKEN": "X"}, {}
+
+    c._raw_http = fake_raw
+    orig = cc.time.sleep
+    cc.time.sleep = lambda *a, **k: None   # no esperar de verdad en el test
+    try:
+        c.login()
+    finally:
+        cc.time.sleep = orig
+    assert c._cst == "C" and c._xsec == "X"
+    assert calls["n"] == 2                  # falló 1, reintentó y funcionó
+
+
+def test_login_agota_reintentos_y_falla():
+    c = _client()
+
+    def always_429(method, url, headers, body=None, net_retries=2):
+        return 429, {}, {"errorCode": "error.too-many.requests"}
+
+    c._raw_http = always_429
+    orig = cc.time.sleep
+    cc.time.sleep = lambda *a, **k: None
+    raised = False
+    try:
+        c.login()
+    except CapitalError as e:
+        raised = True
+        assert "too-many" in str(e)
+    finally:
+        cc.time.sleep = orig
+    assert raised
+
+
+def test_login_credenciales_malas_no_reintenta():
+    c = _client()
+    calls = {"n": 0}
+
+    def bad_creds(method, url, headers, body=None, net_retries=2):
+        calls["n"] += 1
+        return 400, {}, {"errorCode": "error.invalid.details"}
+
+    c._raw_http = bad_creds
+    raised = False
+    try:
+        c.login()
+    except CapitalError:
+        raised = True
+    assert raised and calls["n"] == 1        # error de credenciales → un solo intento
+
+
+def test_ping_ok():
+    c = _client()
+    c._cst = "C"; c._xsec = "X"; c._last_activity = time.monotonic()
+    c._raw_http = lambda *a, **k: (200, {}, {"status": "OK"})
+    assert c.ping() is True
+
+
+def test_ping_falla_devuelve_false():
+    c = _client()
+    c._cst = "C"; c._xsec = "X"; c._last_activity = time.monotonic()
+    c._raw_http = lambda *a, **k: (500, {}, {"errorCode": "boom"})
+    assert c.ping() is False
 
 
 if __name__ == "__main__":

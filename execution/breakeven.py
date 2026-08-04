@@ -115,14 +115,23 @@ class BreakEvenMonitor:
             return []
         return self.on_price(float(bid), float(offer))
 
-    def run(self, interval_seconds: float = 2.0, stop_flag=None) -> None:
-        """Loop de BE. `stop_flag` opcional: callable que devuelve True para cortar."""
-        log.info("BE monitor arrancado (epic=%s, poll=%.1fs)", self.epic, interval_seconds)
+    def run(self, interval_seconds: float = 2.0, stop_flag=None,
+            keepalive_seconds: float = 480.0) -> None:
+        """Loop de BE. `stop_flag` opcional: callable que devuelve True para cortar.
+        Cada `keepalive_seconds` (8 min < los 10 de expiración) pinguea para mantener
+        UNA sola sesión viva todo el día, en vez de re-loguear en cada validación
+        horaria (lo que dispara el rate-limit de /session de Capital.com)."""
+        log.info("BE monitor arrancado (epic=%s, poll=%.1fs, keepalive=%.0fs)",
+                 self.epic, interval_seconds, keepalive_seconds)
+        last_ka = time.monotonic()
         while True:
             if stop_flag is not None and stop_flag():
                 break
             try:
                 self.poll_once()
+                if hasattr(self.broker, "ping") and (time.monotonic() - last_ka) >= keepalive_seconds:
+                    self.broker.ping()
+                    last_ka = time.monotonic()
             except Exception as e:  # noqa: BLE001 — el loop nunca debe morir
-                log.exception("poll_once falló: %s", e)
+                log.exception("poll_once/keepalive falló: %s", e)
             time.sleep(interval_seconds)

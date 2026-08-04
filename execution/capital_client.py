@@ -35,6 +35,8 @@ HOSTS = {
 _SESSION_REFRESH_AFTER = 540.0   # 9 min
 # Rate limit de creación de posiciones: 1 cada 0.1 s (dejamos margen).
 _MIN_ORDER_INTERVAL = 0.12
+# Reintento de login ante rate-limit de creación de sesión (error.too-many.requests).
+_LOGIN_BACKOFF = (15.0, 30.0, 60.0)   # segundos entre reintentos
 
 
 class CapitalError(Exception):
@@ -134,21 +136,44 @@ class CapitalClient:
     # ----------------------------------------------------------- SESSION MGMT
     def login(self) -> None:
         with self._lock:
-            status, hdrs, payload = self._raw_http(
-                "POST", f"{self.base}/api/v1/session",
-                headers={"X-CAP-API-KEY": self.cfg.api_key,
-                         "Content-Type": "application/json"},
-                body={"identifier": self.cfg.identifier, "password": self.cfg.password},
-            )
-            if status != 200:
-                raise CapitalError(f"login fallido: {payload.get('errorCode', payload)}",
-                                   status, payload)
-            self._cst = hdrs.get("CST")
-            self._xsec = hdrs.get("X-SECURITY-TOKEN")
-            if not self._cst or not self._xsec:
-                raise CapitalError("login sin tokens CST/X-SECURITY-TOKEN", status, payload)
-            self._last_activity = time.monotonic()
-            log.info("Capital.com sesión iniciada (%s)", self.cfg.environment)
+            last = (None, None, None)
+            for attempt in range(len(_LOGIN_BACKOFF) + 1):
+                status, hdrs, payload = self._raw_http(
+                    "POST", f"{self.base}/api/v1/session",
+                    headers={"X-CAP-API-KEY": self.cfg.api_key,
+                             "Content-Type": "application/json"},
+                    body={"identifier": self.cfg.identifier, "password": self.cfg.password},
+                )
+                if status == 200:
+                    self._cst = hdrs.get("CST")
+                    self._xsec = hdrs.get("X-SECURITY-TOKEN")
+                    if not self._cst or not self._xsec:
+                        raise CapitalError("login sin tokens CST/X-SECURITY-TOKEN", status, payload)
+                    self._last_activity = time.monotonic()
+                    log.info("Capital.com sesión iniciada (%s)", self.cfg.environment)
+                    return
+                code = payload.get("errorCode") if isinstance(payload, dict) else None
+                last = (status, code, payload)
+                # Rate-limit de sesión → esperar y reintentar (no es un error de credenciales).
+                if (status == 429 or code == "error.too-many.requests") and attempt < len(_LOGIN_BACKOFF):
+                    wait = _LOGIN_BACKOFF[attempt]
+                    log.warning("login rate-limited (%s) → espera %.0fs y reintenta (%d/%d)",
+                                code, wait, attempt + 1, len(_LOGIN_BACKOFF))
+                    time.sleep(wait)
+                    continue
+                break
+            status, code, payload = last
+            raise CapitalError(f"login fallido: {code or payload}", status, payload)
+
+    def ping(self) -> bool:
+        """Mantiene viva la sesión sin re-crearla (evita el rate-limit de /session).
+        GET liviano; resetea la inactividad tanto acá como del lado de Capital.com."""
+        try:
+            self._request("GET", "/api/v1/ping")
+            return True
+        except CapitalError as e:
+            log.warning("ping falló: %s", e)
+            return False
 
     def _ensure_session(self) -> None:
         if self._cst is None or (time.monotonic() - self._last_activity) > _SESSION_REFRESH_AFTER:
