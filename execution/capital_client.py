@@ -250,6 +250,18 @@ class CapitalClient:
         """Estado de una orden por su dealReference → trae dealId, status, level."""
         return self._request("GET", f"/api/v1/confirms/{deal_reference}")
 
+    def activities(self, last_period_seconds: int = 3600) -> list:
+        """Historial de actividad. Cada cierre de POSITION trae `source` (SL/TP/USER)."""
+        return self._request(
+            "GET", f"/api/v1/history/activity?lastPeriod={int(last_period_seconds)}"
+        ).get("activities", [])
+
+    def transactions(self, last_period_seconds: int = 3600) -> list:
+        """Historial de transacciones → trae el P/L realizado por dealId."""
+        return self._request(
+            "GET", f"/api/v1/history/transactions?lastPeriod={int(last_period_seconds)}"
+        ).get("transactions", [])
+
     # ---------------------------------------------------------------- ESCRITURA
     def _require_execution(self, action: str) -> None:
         if not self.cfg.allow_execution:

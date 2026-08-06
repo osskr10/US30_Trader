@@ -96,8 +96,17 @@ class Notifier:
             f"🟡 {PREFIX} — BREAK EVEN\n{epic} {direction}\nSL movido a {be_stop:.1f}"
         )
 
-    def notify_close_detected(self, *, direction: str, epic: str) -> bool:
-        return self.send(f"⚪ {PREFIX} — posición {epic} {direction} cerrada (SL/TP alcanzado)")
+    def notify_outcome(self, *, direction: str, epic: str, kind: str,
+                       pnl: float | None = None) -> bool:
+        """Resultado del cierre. kind ∈ TP | SL | BE | MANUAL | UNKNOWN."""
+        icons = {"TP": "🎯", "SL": "🛑", "BE": "🟡", "MANUAL": "⚪", "UNKNOWN": "⚪"}
+        labels = {"TP": "TP alcanzado", "SL": "SL alcanzado",
+                  "BE": "cerrado en breakeven", "MANUAL": "cerrado manualmente",
+                  "UNKNOWN": "posición cerrada"}
+        icon = icons.get(kind, "⚪")
+        label = labels.get(kind, "posición cerrada")
+        pnltxt = "" if pnl is None else f" ({'+' if pnl >= 0 else '-'}${abs(pnl):.2f})"
+        return self.send(f"{icon} {PREFIX} — {label}\n{epic} {direction}{pnltxt}")
 
     def notify_error(self, text: str) -> bool:
         return self.send(f"🔴 {PREFIX} — ERROR\n{text}")

@@ -166,6 +166,9 @@ def main() -> None:
         applied = be_monitor.poll_once()
         if applied:
             log.info("BE aplicado a: %s", applied)
+        closed = be_monitor.check_closures()
+        if closed:
+            log.info("cierres detectados: %s", closed)
         signal_source.close()
         return
 

@@ -70,6 +70,20 @@ def test_formatters_incluyen_datos_clave():
     assert "ERROR" in joined and "algo falló" in joined
 
 
+def test_notify_outcome_formatos():
+    ch = FakeChannel()
+    n = Notifier([ch])
+    n.notify_outcome(direction="BUY", epic="US30", kind="TP", pnl=14.0)
+    n.notify_outcome(direction="SELL", epic="US30", kind="SL", pnl=-7.02)
+    n.notify_outcome(direction="BUY", epic="US30", kind="BE", pnl=0.5)
+    n.notify_outcome(direction="BUY", epic="US30", kind="MANUAL", pnl=None)
+    j = "\n".join(ch.messages)
+    assert "TP alcanzado" in j and "+$14.00" in j
+    assert "SL alcanzado" in j and "-$7.02" in j
+    assert "breakeven" in j
+    assert "cerrado manualmente" in j       # pnl None → sin monto
+
+
 def _write(content):
     fd, path = tempfile.mkstemp(suffix=".env")
     with os.fdopen(fd, "w") as f:

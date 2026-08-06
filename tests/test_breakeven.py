@@ -14,11 +14,16 @@ from execution.state_store import InMemoryStateStore  # noqa: E402
 
 
 class FakeBroker:
-    def __init__(self, bid=53000.0, offer=53002.0, status="TRADEABLE", raise_on_update=False):
+    def __init__(self, bid=53000.0, offer=53002.0, status="TRADEABLE", raise_on_update=False,
+                 open_ids=None, activities=None, transactions=None, raise_on_positions=False):
         self._bid = bid
         self._offer = offer
         self._status = status
         self._raise = raise_on_update
+        self._open_ids = list(open_ids) if open_ids is not None else []
+        self._activities = activities or []
+        self._transactions = transactions or []
+        self._raise_positions = raise_on_positions
         self.updates = []   # (deal_id, stop_level)
 
     def current_price(self, epic):
@@ -30,6 +35,26 @@ class FakeBroker:
             raise RuntimeError("broker caído")
         self.updates.append((deal_id, stop_level))
         return {"dealId": deal_id, "dealStatus": "ACCEPTED"}
+
+    def positions_for_epic(self, epic):
+        if self._raise_positions:
+            raise RuntimeError("no se pudo leer posiciones")
+        return [{"position": {"dealId": d}} for d in self._open_ids]
+
+    def activities(self, last_period_seconds=3600):
+        return self._activities
+
+    def transactions(self, last_period_seconds=3600):
+        return self._transactions
+
+
+class FakeNotifier:
+    def __init__(self):
+        self.outcomes = []
+
+    def notify_outcome(self, *, direction, epic, kind, pnl=None):
+        self.outcomes.append((direction, epic, kind, pnl))
+        return True
 
 
 def _open_record(aid="a1", direction="BUY", be_trigger=53150.0, be_stop=53005.0,
@@ -159,6 +184,92 @@ def test_poll_once_mercado_no_operable_no_aplica():
     mon = BreakEvenMonitor(br, st, "US30")
     assert mon.poll_once() == []
     assert br.updates == []
+
+
+# --------------------------------------------------------------------------- cierres
+def _act(deal_id, source):
+    return {"dealId": deal_id, "type": "POSITION", "status": "ACCEPTED", "source": source}
+
+
+def _tx(deal_id, size):
+    return {"dealId": deal_id, "transactionType": "TRADE", "size": size}
+
+
+def test_cierre_por_SL_notifica_perdida():
+    st = _store_with(_open_record(deal_id="D1", be_done=False))
+    br = FakeBroker(open_ids=[], activities=[_act("D1", "SL")], transactions=[_tx("D1", "-7.02")])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    closed = mon.check_closures()
+    assert closed == ["a1"]
+    assert nt.outcomes == [("BUY", "US30", "SL", -7.02)]
+    rec = st.get("a1")
+    assert rec["action"] == "closed" and rec["outcome"] == "SL" and rec["closed_notified"] is True
+
+
+def test_cierre_por_TP_notifica_ganancia():
+    st = _store_with(_open_record(deal_id="D1"))
+    br = FakeBroker(open_ids=[], activities=[_act("D1", "TP")], transactions=[_tx("D1", "+14.00")])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == ["a1"]
+    assert nt.outcomes == [("BUY", "US30", "TP", 14.0)]
+
+
+def test_cierre_en_BE_si_ya_estaba_en_be():
+    st = _store_with(_open_record(deal_id="D1", be_done=True))
+    br = FakeBroker(open_ids=[], activities=[_act("D1", "SL")], transactions=[_tx("D1", "0.50")])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == ["a1"]
+    assert nt.outcomes[0][2] == "BE"          # source SL + be_done → breakeven
+
+
+def test_cierre_manual():
+    st = _store_with(_open_record(deal_id="D1"))
+    br = FakeBroker(open_ids=[], activities=[_act("D1", "USER")], transactions=[_tx("D1", "-1.0")])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == ["a1"]
+    assert nt.outcomes[0][2] == "MANUAL"
+
+
+def test_posicion_sigue_abierta_no_cierra():
+    st = _store_with(_open_record(deal_id="D1"))
+    br = FakeBroker(open_ids=["D1"])           # sigue abierta
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == []
+    assert nt.outcomes == []
+    assert st.get("a1")["action"] == "open"
+
+
+def test_no_leer_posiciones_no_concluye_cierre():
+    st = _store_with(_open_record(deal_id="D1"))
+    br = FakeBroker(raise_on_positions=True)   # no se pudo leer → NO concluir cierre
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == []
+    assert st.get("a1")["action"] == "open"    # sigue abierta, no se marca cerrada
+
+
+def test_cierre_otro_epic_se_ignora():
+    st = _store_with(_open_record(aid="x", deal_id="D9", epic="US100"))
+    br = FakeBroker(open_ids=[])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == []          # no es de este epic
+    assert nt.outcomes == []
+
+
+def test_cierre_no_re_notifica():
+    st = _store_with(_open_record(deal_id="D1"))
+    br = FakeBroker(open_ids=[], activities=[_act("D1", "SL")], transactions=[_tx("D1", "-5")])
+    nt = FakeNotifier()
+    mon = BreakEvenMonitor(br, st, "US30", notifier=nt)
+    assert mon.check_closures() == ["a1"]
+    assert mon.check_closures() == []          # ya marcada closed_notified → no repite
+    assert len(nt.outcomes) == 1
 
 
 # --------------------------------------------------------------------------- runner
