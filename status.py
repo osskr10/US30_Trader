@@ -4,11 +4,24 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from execution.capital_client import CapitalClient, CapitalConfig
 
 HERE = Path(__file__).resolve().parent
+
+
+def _ny(ts_utc) -> str:
+    """Formatea un timestamp ISO-UTC a 'MM/DD HH:MM' hora NY (macOS no tiene date -d)."""
+    if not ts_utc:
+        return ""
+    try:
+        return datetime.fromisoformat(str(ts_utc)).astimezone(
+            ZoneInfo("America/New_York")).strftime("%m/%d %H:%M")
+    except Exception:
+        return str(ts_utc)
 
 
 def _epic() -> str:
@@ -63,9 +76,11 @@ def main() -> None:
             recs = [r for r in data.values() if r.get("ts_utc")]
         if recs:
             r = max(recs, key=lambda x: x.get("ts_utc", ""))
-            print("LASTOP={}|{}|{}|{}|{}|{}|{}".format(
+            pnl = r.get("pnl")
+            print("LASTOP={}|{}|{}|{}|{}|{}|{}|{}|{}".format(
                 r.get("action"), r.get("direction"), r.get("entry"),
-                r.get("sl"), r.get("tp"), r.get("size"), r.get("ts_utc")))
+                r.get("sl"), r.get("tp"), r.get("size"), _ny(r.get("ts_utc")),
+                r.get("outcome") or "", "" if pnl is None else pnl))
         else:
             print("LASTOP=none")
     except Exception as e:  # noqa: BLE001
