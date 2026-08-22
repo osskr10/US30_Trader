@@ -197,6 +197,77 @@ def test_login_credenciales_malas_no_reintenta():
     assert raised and calls["n"] == 1        # error de credenciales → un solo intento
 
 
+def test_open_and_confirm_reintenta_confirm_404_luego_ok():
+    c = _client()
+    c.open_market_position = lambda **k: {"dealReference": "o_x"}
+    calls = {"n": 0}
+
+    def fake_confirm(ref):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise CapitalError("nf", status=404, payload={"errorCode": "error.not-found.dealReference"})
+        return {"dealStatus": "ACCEPTED", "affectedDeals": [{"dealId": "POS", "status": "OPENED"}]}
+
+    c.confirm = fake_confirm
+    orig = cc.time.sleep
+    cc.time.sleep = lambda *a, **k: None
+    try:
+        r = c.open_and_confirm(epic="US100", direction="SELL", size=0.126,
+                               stop_level=1, profit_level=2)
+    finally:
+        cc.time.sleep = orig
+    assert r.get("dealStatus") == "ACCEPTED"
+    assert calls["n"] == 3          # falló 2 veces, al 3er intento OK
+
+
+def test_open_and_confirm_recupera_por_posiciones():
+    from execution.executor import resolve_position_deal_id
+    c = _client()
+    c.open_market_position = lambda **k: {"dealReference": "o_x"}
+
+    def always_404(ref):
+        raise CapitalError("nf", status=404, payload={})
+
+    c.confirm = always_404
+    c.positions_for_epic = lambda epic: [
+        {"position": {"direction": "SELL", "size": 0.126, "dealId": "RECO"}}]
+    orig = cc.time.sleep
+    cc.time.sleep = lambda *a, **k: None
+    try:
+        r = c.open_and_confirm(epic="US100", direction="SELL", size=0.126,
+                               stop_level=1, profit_level=2)
+    finally:
+        cc.time.sleep = orig
+    assert r.get("recovered") is True
+    assert resolve_position_deal_id(r) == "RECO"
+
+
+def test_open_and_confirm_unknown_si_no_recupera():
+    c = _client()
+    c.open_market_position = lambda **k: {"dealReference": "o_x"}
+
+    def always_404(ref):
+        raise CapitalError("nf", status=404, payload={})
+
+    c.confirm = always_404
+    c.positions_for_epic = lambda epic: []       # no hay posición que coincida
+    orig = cc.time.sleep
+    cc.time.sleep = lambda *a, **k: None
+    try:
+        r = c.open_and_confirm(epic="US100", direction="SELL", size=0.126,
+                               stop_level=1, profit_level=2)
+    finally:
+        cc.time.sleep = orig
+    assert r.get("dealStatus") == "UNKNOWN"
+
+
+def test_recover_position_ignora_size_distinto():
+    c = _client()
+    c.positions_for_epic = lambda epic: [
+        {"position": {"direction": "SELL", "size": 0.999, "dealId": "OTRA"}}]
+    assert c._recover_position("US100", "SELL", 0.126) is None   # size no coincide
+
+
 def test_ping_ok():
     c = _client()
     c._cst = "C"; c._xsec = "X"; c._last_activity = time.monotonic()

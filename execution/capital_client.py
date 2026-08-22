@@ -294,15 +294,55 @@ class CapitalClient:
 
     def open_and_confirm(self, *, epic: str, direction: str, size: float,
                          stop_level: float, profit_level: float,
-                         guaranteed_stop: bool = False, confirm_wait: float = 1.0) -> dict:
-        """Abre y espera el confirm para devolver el dealId permanente + estado."""
+                         guaranteed_stop: bool = False, confirm_wait: float = 1.0,
+                         confirm_retries: int = 6, confirm_backoff: float = 2.0) -> dict:
+        """Abre y resuelve el dealId de la posición de forma robusta.
+
+        El `GET /confirms/{ref}` puede devolver 404 unos segundos tras el POST (el deal
+        aún no es consultable, sobre todo si Capital.com está lento/504). Por eso:
+          1) reintenta el confirm ante 404 con backoff, y
+          2) si aun así no responde, hace FALLBACK: busca la posición abierta que
+             coincida (epic+dirección+size) y la adopta — la orden YA se envió, así que
+             evita perder de vista una posición realmente abierta.
+        Devuelve un dict tipo confirm (con affectedDeals/dealId) o {dealStatus: UNKNOWN}.
+        """
         ref = self.open_market_position(
             epic=epic, direction=direction, size=size,
             stop_level=stop_level, profit_level=profit_level,
             guaranteed_stop=guaranteed_stop,
         ).get("dealReference")
         time.sleep(confirm_wait)
-        return self.confirm(ref)
+        for attempt in range(confirm_retries):
+            try:
+                return self.confirm(ref)
+            except CapitalError as e:
+                if e.status == 404 and attempt < confirm_retries - 1:
+                    log.warning("confirm %s no listo (404) → reintento %d/%d",
+                                ref, attempt + 1, confirm_retries)
+                    time.sleep(confirm_backoff)
+                    continue
+                log.warning("confirm %s no resuelto (%s) → fallback por posiciones", ref, e)
+                break
+        recovered = self._recover_position(epic, direction, size)
+        if recovered:
+            return recovered
+        return {"dealStatus": "UNKNOWN", "dealReference": ref}
+
+    def _recover_position(self, epic: str, direction: str, size: float):
+        """Fallback: encuentra la posición recién abierta (mismo epic/dirección/size)
+        cuando el confirm no responde. Devuelve un dict tipo confirm o None."""
+        try:
+            for p in self.positions_for_epic(epic):
+                pos = p.get("position", p)
+                if (pos.get("direction") == direction.upper()
+                        and abs(float(pos.get("size", 0) or 0) - float(size)) < 1e-6):
+                    did = pos.get("dealId")
+                    log.warning("posición recuperada por fallback (confirm 404): %s", did)
+                    return {"dealStatus": "ACCEPTED", "recovered": True,
+                            "affectedDeals": [{"dealId": did, "status": "OPENED"}]}
+        except Exception as e:  # noqa: BLE001
+            log.warning("fallback de recuperación falló: %s", e)
+        return None
 
     def update_position_stop(self, deal_id: str, stop_level: float,
                              profit_level: float | None = None) -> dict:

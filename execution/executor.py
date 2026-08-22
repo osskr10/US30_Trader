@@ -224,16 +224,24 @@ class Executor:
         if status not in ("ACCEPTED", "OPEN") or not deal_id:
             return fail(f"orden no aceptada (status={status}, dealId={deal_id})")
 
+        recovered = bool(result.get("recovered"))
         record = self._record(setup, plan, action="open")
         record["broker_result"] = result
         record["deal_id"] = deal_id
         record["be_done"] = False
+        record["recovered"] = recovered
         self.store.mark(aid, record)
+        if recovered:
+            log.warning("posición %s recuperada por fallback (confirm 404) (id=%s)", deal_id, aid[:12])
         if self.notifier:
             self.notifier.notify_open(
                 direction=plan.direction, epic=self.cfg.epic, size=plan.size,
                 entry=plan.entry, sl=plan.sl, tp=plan.tp,
                 risk_amount=plan.risk_realized, risk_pct=self.cfg.risk_pct, balance=balance)
+            if recovered:
+                self.notifier.notify_info(
+                    f"{self.cfg.epic} {plan.direction}: el confirm tardó (404), "
+                    f"posición recuperada y en seguimiento normal.")
         return Decision(action="open", reason="", alert_id=aid,
                         direction=plan.direction, mode=self.cfg.mode, plan=plan,
                         broker_result=result)
