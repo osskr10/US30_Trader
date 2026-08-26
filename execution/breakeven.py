@@ -77,7 +77,11 @@ class BreakEvenMonitor:
         deal_id = rec.get("deal_id")
         try:
             if deal_id:
-                self.broker.update_position_stop(deal_id, stop_level=be_stop)
+                # Reenviar el TP original: el PUT /positions de Capital.com reemplaza los
+                # niveles, así que si mandamos solo el stop, BORRA el profitLevel (TP) y el
+                # trade pierde su objetivo 1:2. rec["tp"] lo preserva (None en shadow → no-op).
+                self.broker.update_position_stop(deal_id, stop_level=be_stop,
+                                                 profit_level=rec.get("tp"))
                 log.info("BE aplicado %s %s → SL a %.2f (deal=%s id=%s)",
                          rec.get("direction"), self.epic, be_stop, deal_id, str(aid)[:12])
                 if self.notifier:

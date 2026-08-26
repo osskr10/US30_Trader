@@ -24,7 +24,7 @@ class FakeBroker:
         self._activities = activities or []
         self._transactions = transactions or []
         self._raise_positions = raise_on_positions
-        self.updates = []   # (deal_id, stop_level)
+        self.updates = []   # (deal_id, stop_level, profit_level)
 
     def current_price(self, epic):
         return {"bid": self._bid, "offer": self._offer, "spread": self._offer - self._bid,
@@ -33,7 +33,7 @@ class FakeBroker:
     def update_position_stop(self, deal_id, stop_level, profit_level=None):
         if self._raise:
             raise RuntimeError("broker caído")
-        self.updates.append((deal_id, stop_level))
+        self.updates.append((deal_id, stop_level, profit_level))
         return {"dealId": deal_id, "dealStatus": "ACCEPTED"}
 
     def positions_for_epic(self, epic):
@@ -81,9 +81,21 @@ def test_long_dispara_cuando_bid_alcanza_trigger():
     mon = BreakEvenMonitor(br, st, "US30")
     applied = mon.on_price(bid=53150.0, offer=53152.0)
     assert applied == ["a1"]
-    assert br.updates == [("DEAL1", 53005.0)]
+    assert br.updates == [("DEAL1", 53005.0, 53300.0)]
     assert st.get("a1")["be_done"] is True
     assert "be_ts_utc" in st.get("a1")
+
+
+def test_be_reenvia_tp_para_no_borrarlo():
+    """Regresión: el PUT /positions de Capital.com reemplaza los niveles; el BE debe
+    reenviar el TP original o la posición queda SIN take-profit (pierde el objetivo 1:2)."""
+    st = _store_with(_open_record(direction="BUY", be_trigger=53150.0, deal_id="DEAL1"))
+    br = FakeBroker()
+    mon = BreakEvenMonitor(br, st, "US30")
+    mon.on_price(bid=53150.0, offer=53152.0)
+    assert len(br.updates) == 1
+    deal_id, stop_level, profit_level = br.updates[0]
+    assert profit_level == 53300.0            # el tp del record se reenvía, no se pierde
 
 
 def test_long_no_dispara_si_bid_por_debajo():
@@ -104,7 +116,7 @@ def test_short_dispara_cuando_offer_baja_a_trigger():
     mon = BreakEvenMonitor(br, st, "US30")
     applied = mon.on_price(bid=52847.0, offer=52850.0)
     assert applied == ["s1"]
-    assert br.updates == [("DEALS", 52995.0)]
+    assert br.updates == [("DEALS", 52995.0, 53300.0)]
     assert st.get("s1")["be_done"] is True
 
 
@@ -175,7 +187,7 @@ def test_poll_once_aplica_be_via_rest():
     mon = BreakEvenMonitor(br, st, "US30")
     applied = mon.poll_once()
     assert applied == ["a1"]
-    assert br.updates == [("DEAL1", 53005.0)]
+    assert br.updates == [("DEAL1", 53005.0, 53300.0)]
 
 
 def test_poll_once_mercado_no_operable_no_aplica():
