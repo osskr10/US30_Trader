@@ -205,11 +205,27 @@ def main() -> None:
                 slept += 1.0
             if stop["flag"]:
                 break
-            try:
-                do_validation_cycle(executor, broker, signal_source)
-            except Exception as e:  # noqa: BLE001 — el loop no debe morir
-                log.exception("ciclo de validación falló: %s", e)
-                notifier.notify_error(f"ciclo de validación falló: {e}")
+            # Reintenta el ciclo ante errores TRANSITORIOS (p.ej. blip de OANDA
+            # "Insufficient authorization" que se recupera solo en segundos). Solo
+            # manda la alerta ruidosa a Telegram si fallan TODOS los intentos.
+            # Seguro de reintentar: process_once deduplica por alert_id (no doble-abre)
+            # y current_bias es solo lectura.
+            attempts, backoff = 3, 15
+            for attempt in range(1, attempts + 1):
+                try:
+                    do_validation_cycle(executor, broker, signal_source)
+                    break
+                except Exception as e:  # noqa: BLE001 — el loop no debe morir
+                    if attempt < attempts and not stop["flag"]:
+                        log.warning("ciclo de validación falló (intento %d/%d): %s — reintento en %ds",
+                                    attempt, attempts, e, backoff)
+                        slept2 = 0.0
+                        while slept2 < backoff and not stop["flag"]:
+                            time.sleep(min(1.0, backoff - slept2))
+                            slept2 += 1.0
+                    else:
+                        log.exception("ciclo de validación falló tras %d intentos: %s", attempt, e)
+                        notifier.notify_error(f"ciclo de validación falló tras {attempt} intentos: {e}")
     finally:
         be_thread.join(timeout=5)
         signal_source.close()
