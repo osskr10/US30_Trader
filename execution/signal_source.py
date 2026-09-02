@@ -22,6 +22,7 @@ pydantic, python-dotenv, requests). En shadow: `us30_alerts/.venv/bin/python`.
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -93,8 +94,12 @@ class AlertsSignalSource:
             now_ny = datetime.now(self._tz)
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        df_entry, _forming, _live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        df_entry, _forming, live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
         if df_entry is None or df_entry.empty or len(df_entry) < self.cfg.ma_length:
+            return []
+        # Si HOY cruzó el bias del diario, NO se opera en todo el día (bias débil).
+        closed_bias = str(df_entry.iloc[-1].get("bias", "NONE"))
+        if self._daily_cross_blocked(now_ny, closed_bias, live_bias):
             return []
         results = self.evaluator.validate_last_closed_candle(df_entry, now_utc, now_ny)
 
@@ -115,6 +120,36 @@ class AlertsSignalSource:
                 confirm_candle_open=payload.confirm_candle_open,
             ))
         return setups
+
+    def _cross_block_file(self) -> Path:
+        return Path(__file__).resolve().parent.parent / "state" / "daily_cross_block.json"
+
+    def _daily_cross_blocked(self, now_ny: datetime, closed_bias: str, live_bias: str) -> bool:
+        """Espejo del bloqueo del engine: si HOY cruzó el bias del DIARIO (el diario EN
+        FORMACIÓN difiere del último CERRADO), el trader NO entra en todo el día. Es
+        PEGAJOSO: queda persistido por fecha, así sigue bloqueado aunque el cruce se
+        revierta (un cruce fresco es un bias débil que suele repintar).
+
+        El aviso a Telegram lo manda el engine de alertas — el trader solo bloquea."""
+        if not getattr(self.cfg.filters, "block_on_daily_cross", False):
+            return False
+        today = now_ny.date().isoformat()
+        path = self._cross_block_file()
+        try:
+            if path.exists() and json.loads(path.read_text()).get("date") == today:
+                return True
+        except Exception:  # noqa: BLE001 — un state corrupto no debe tumbar el ciclo
+            pass
+        if (closed_bias in ("LONG", "SHORT") and live_bias in ("LONG", "SHORT")
+                and closed_bias != live_bias):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({"date": today, "closed_bias": closed_bias,
+                                            "live_bias": live_bias}))
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+        return False
 
     def current_bias(self) -> str:
         """Bias que el engine busca ahora (para logging/contexto). LONG|SHORT|NONE."""
