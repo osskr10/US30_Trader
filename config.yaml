@@ -31,6 +31,11 @@ execution:
   max_concurrent_positions: 1
   max_daily_loss_pct: 3.0    # kill switch de pérdida diaria
 
+  # Timing de la validación post-cierre 1H (segundos tras el cierre HH:00).
+  validation_offset_seconds: 20    # cuándo despierta a evaluar (antes era fijo :01=60s). Menos = menos slippage.
+  validation_retry_seconds: 5      # si la vela aún no cerró en OANDA, reintenta cada N segundos.
+  validation_max_wait_seconds: 90  # tope de espera tras el cierre; si no cierra, valida igual.
+
   # Specs del instrumento US30 (verificadas con orden real en demo 2026-08-03).
   instrument:
     value_per_point: 1.0     # CONFIRMADO: upl=-0.0027 con size 0.001 y ~2.7pts en contra

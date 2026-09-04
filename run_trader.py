@@ -140,12 +140,60 @@ def do_validation_cycle(executor: Executor, broker: CapitalClient,
         log.info("decision: action=%s dir=%s reason=%s", d.action, d.direction, d.reason or "-")
 
 
-def _seconds_until_next_hh01() -> float:
-    now = datetime.now(timezone.utc)
-    nxt = now.replace(minute=1, second=0, microsecond=0)
-    if nxt <= now:
-        nxt += timedelta(hours=1)
-    return max(1.0, (nxt - now).total_seconds())
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _interruptible_sleep(seconds: float, stop: dict) -> None:
+    slept = 0.0
+    while slept < seconds and not stop["flag"]:
+        time.sleep(min(1.0, seconds - slept))
+        slept += 1.0
+
+
+def _seconds_until_next_close_plus(offset_seconds: int) -> float:
+    """Segundos hasta el próximo cierre 1H + offset (HH:00:00 + offset_seconds)."""
+    now = _now_utc()
+    target = now.replace(minute=0, second=0, microsecond=0) + timedelta(seconds=offset_seconds)
+    if target <= now:
+        target += timedelta(hours=1)
+    return max(1.0, (target - now).total_seconds())
+
+
+def _candle_readiness(last_open, expected_open) -> str:
+    """'ready' | 'stale' | 'wait'. Ver run_trader de xauusd1h para el detalle."""
+    if last_open is None:
+        return "wait"
+    if last_open >= expected_open:
+        return "ready"
+    if expected_open - last_open > timedelta(hours=1):
+        return "stale"
+    return "wait"
+
+
+def _wait_for_closed_candle(signal_source: AlertsSignalSource, retry_seconds: int,
+                            max_wait_seconds: int, stop: dict) -> bool:
+    """Al despertar (~HH:00:offset), espera a que OANDA marque CERRADA la vela recién
+    terminada antes de validar. Reintenta cada retry_seconds hasta max_wait_seconds.
+    Devuelve True cuando está lista (o el candle quedó viejo = mercado cerrado)."""
+    close_time = _now_utc().replace(minute=0, second=0, microsecond=0)
+    expected_open = close_time - timedelta(hours=1)
+    deadline = close_time + timedelta(seconds=max_wait_seconds)
+    while not stop["flag"]:
+        try:
+            last = signal_source.last_closed_open_utc()
+        except Exception as e:  # noqa: BLE001
+            log.warning("readiness: fallo leyendo el último candle: %s", e)
+            last = None
+        last_open = last.replace(tzinfo=None) if last is not None else None
+        if _candle_readiness(last_open, expected_open) in ("ready", "stale"):
+            return True
+        if _now_utc() >= deadline:
+            log.warning("readiness: la vela esperada (%s) no cerró tras %ds — valido igual",
+                        expected_open.isoformat(), max_wait_seconds)
+            return False
+        _interruptible_sleep(retry_seconds, stop)
+    return False
 
 
 def main() -> None:
@@ -194,15 +242,19 @@ def main() -> None:
     )
     be_thread.start()
 
-    # Hilo principal: validación tras cada cierre 1H (:01).
-    log.info("runner combinado arrancado (Ctrl-C para salir)")
+    # Hilo principal: validación tras cada cierre 1H. Despierta a HH:00 + offset (default
+    # 20s) y espera a que la vela esté cerrada antes de validar (reintento).
+    offset_s = tcfg.validation_offset_seconds
+    retry_s = tcfg.validation_retry_seconds
+    max_wait_s = tcfg.validation_max_wait_seconds
+    log.info("runner combinado arrancado — validación a HH:00+%ds (reintento cada %ds hasta %ds)",
+             offset_s, retry_s, max_wait_s)
     try:
         while not stop["flag"]:
-            slept = 0.0
-            wait = _seconds_until_next_hh01()
-            while slept < wait and not stop["flag"]:
-                time.sleep(min(1.0, wait - slept))
-                slept += 1.0
+            _interruptible_sleep(_seconds_until_next_close_plus(offset_s), stop)
+            if stop["flag"]:
+                break
+            _wait_for_closed_candle(signal_source, retry_s, max_wait_s, stop)
             if stop["flag"]:
                 break
             # Reintenta el ciclo ante errores TRANSITORIOS (p.ej. blip de OANDA

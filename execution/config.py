@@ -45,6 +45,10 @@ class TraderConfig:
     min_units_action: str
     max_concurrent_positions: int
     max_daily_loss_pct: float
+    # timing de la validación post-cierre (segundos tras el cierre 1H)
+    validation_offset_seconds: int
+    validation_retry_seconds: int
+    validation_max_wait_seconds: int
     # instrument spec
     value_per_point: float
     size_increment: float
@@ -140,6 +144,9 @@ def parse_trader_config(raw: Dict[str, Any]) -> TraderConfig:
         min_units_action=min_units_action,
         max_concurrent_positions=max_conc,
         max_daily_loss_pct=_pos(ex.get("max_daily_loss_pct", 3.0), "execution.max_daily_loss_pct"),
+        validation_offset_seconds=int(ex.get("validation_offset_seconds", 20)),
+        validation_retry_seconds=max(1, int(ex.get("validation_retry_seconds", 5))),
+        validation_max_wait_seconds=int(ex.get("validation_max_wait_seconds", 90)),
         value_per_point=_pos(inst.get("value_per_point", 1.0), "instrument.value_per_point"),
         size_increment=_pos(inst.get("size_increment", 0.001), "instrument.size_increment"),
         min_deal_size=_pos(inst.get("min_deal_size", 0.001), "instrument.min_deal_size"),

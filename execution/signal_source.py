@@ -151,6 +151,15 @@ class AlertsSignalSource:
             return True
         return False
 
+    def last_closed_open_utc(self) -> Optional[datetime]:
+        """Datetime (UTC, tz-naive) de apertura del ÚLTIMO candle 1H CERRADO que ve el
+        feed (readiness). None si no hay datos."""
+        df_entry, _forming, _live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        if df_entry is None or df_entry.empty:
+            return None
+        import pandas as pd  # import perezoso
+        return pd.Timestamp(df_entry.iloc[-1]["datetime"]).to_pydatetime()
+
     def current_bias(self) -> str:
         """Bias que el engine busca ahora (para logging/contexto). LONG|SHORT|NONE."""
         df_entry, _forming, live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
