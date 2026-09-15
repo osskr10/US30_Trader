@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy de us30_trader al VPS (5.78.233.17), espejando el patrón de us30_alerts.
+# Deploy de us30_trader al VPS (188.34.161.113), espejando el patrón de us30_alerts.
 # Reusa el venv de /opt/us30_alerts. Corre DESDE la Mac.
 #
 #   bash deploy/deploy_vps.sh
@@ -8,7 +8,7 @@
 # arranca el servicio. El .env (secrets) viaja por scp cifrado.
 set -euo pipefail
 
-VPS="root@5.78.233.17"
+VPS="root@188.34.161.113"
 LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="/opt/us30_trader"
 TARBALL="/tmp/us30_trader_deploy.tgz"
