@@ -163,14 +163,48 @@ class BreakEvenMonitor:
             kind = "UNKNOWN"
         return kind, pnl
 
+    def _account_context(self, exclude_deal_id: str | None = None):
+        """Devuelve (balance, others) para enriquecer la notificación de cierre:
+          - balance: balance de la cuenta tras el cierre (float o None).
+          - others: lista (epic, direction, upl) de OTRAS posiciones abiertas en la
+            cuenta (compartida entre pares), excluyendo la que se acaba de cerrar.
+        Todo defensivo: si el broker falla, devuelve (None, None) y no rompe el cierre."""
+        balance = None
+        try:
+            balance = float(self.broker.balance().get("balance"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("no pude leer balance para la notificación: %s", e)
+        others = None
+        try:
+            others = []
+            for p in self.broker.positions():
+                pos = p.get("position", p) if isinstance(p, dict) else {}
+                mkt = p.get("market", {}) if isinstance(p, dict) else {}
+                did = pos.get("dealId")
+                if exclude_deal_id and did == exclude_deal_id:
+                    continue
+                epic = mkt.get("epic") or mkt.get("instrumentName") or pos.get("epic") or "?"
+                direction = pos.get("direction") or "?"
+                upl = pos.get("upl")
+                try:
+                    upl = float(upl) if upl is not None else None
+                except Exception:  # noqa: BLE001
+                    upl = None
+                others.append((epic, direction, upl))
+        except Exception as e:  # noqa: BLE001
+            log.warning("no pude leer posiciones abiertas para la notificación: %s", e)
+            others = None
+        return balance, others
+
     def _handle_closure(self, rec: dict) -> None:
         aid = rec.get("alert_id")
         kind, pnl = self._resolve_outcome(rec.get("deal_id"), bool(rec.get("be_done")))
         log.info("CIERRE %s %s → %s pnl=%s (id=%s)",
                  rec.get("direction"), self.epic, kind, pnl, str(aid)[:12])
         if self.notifier:
+            balance, others = self._account_context(exclude_deal_id=rec.get("deal_id"))
             self.notifier.notify_outcome(direction=rec.get("direction"), epic=self.epic,
-                                         kind=kind, pnl=pnl)
+                                         kind=kind, pnl=pnl, balance=balance, others=others)
         updated = dict(rec)
         updated["action"] = "closed"
         updated["outcome"] = kind

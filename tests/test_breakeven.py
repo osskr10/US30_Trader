@@ -41,6 +41,13 @@ class FakeBroker:
             raise RuntimeError("no se pudo leer posiciones")
         return [{"position": {"dealId": d}} for d in self._open_ids]
 
+    def balance(self):
+        return {"balance": 1000.0, "available": 900.0}
+
+    def positions(self):
+        return [{"position": {"dealId": d, "direction": "BUY", "upl": 1.5},
+                 "market": {"epic": "OTHER"}} for d in self._open_ids]
+
     def activities(self, last_period_seconds=3600):
         return self._activities
 
@@ -52,8 +59,10 @@ class FakeNotifier:
     def __init__(self):
         self.outcomes = []
 
-    def notify_outcome(self, *, direction, epic, kind, pnl=None):
+    def notify_outcome(self, *, direction, epic, kind, pnl=None, balance=None, others=None):
         self.outcomes.append((direction, epic, kind, pnl))
+        self.last_balance = balance
+        self.last_others = others
         return True
 
 

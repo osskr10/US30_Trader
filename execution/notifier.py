@@ -97,8 +97,14 @@ class Notifier:
         )
 
     def notify_outcome(self, *, direction: str, epic: str, kind: str,
-                       pnl: float | None = None) -> bool:
-        """Resultado del cierre. kind ∈ TP | SL | BE | MANUAL | UNKNOWN."""
+                       pnl: float | None = None,
+                       balance: float | None = None,
+                       others: list | None = None) -> bool:
+        """Resultado del cierre. kind ∈ TP | SL | BE | MANUAL | UNKNOWN.
+
+        `balance`: balance de la cuenta tras el cierre (opcional).
+        `others`: lista de (epic, direction, upl) de OTRAS operaciones abiertas en la
+        cuenta (compartida entre pares). Se listan para saber qué queda en curso."""
         icons = {"TP": "🎯", "SL": "🛑", "BE": "🟡", "MANUAL": "⚪", "UNKNOWN": "⚪"}
         labels = {"TP": "TP alcanzado", "SL": "SL alcanzado",
                   "BE": "cerrado en breakeven", "MANUAL": "cerrado manualmente",
@@ -106,7 +112,18 @@ class Notifier:
         icon = icons.get(kind, "⚪")
         label = labels.get(kind, "posición cerrada")
         pnltxt = "" if pnl is None else f" ({'+' if pnl >= 0 else '-'}${abs(pnl):.2f})"
-        return self.send(f"{icon} {PREFIX} — {label}\n{epic} {direction}{pnltxt}")
+        lines = [f"{icon} {PREFIX} — {label}", f"{epic} {direction}{pnltxt}"]
+        if balance is not None:
+            lines.append(f"Balance: ${balance:.2f}")
+        if others is not None:
+            if others:
+                lines.append("En curso:")
+                for oepic, odir, oupl in others:
+                    upltxt = "" if oupl is None else f" ({'+' if oupl >= 0 else '-'}${abs(oupl):.2f})"
+                    lines.append(f"  • {oepic} {odir}{upltxt}")
+            else:
+                lines.append("En curso: ninguna otra operación abierta")
+        return self.send("\n".join(lines))
 
     def notify_error(self, text: str) -> bool:
         return self.send(f"🔴 {PREFIX} — ERROR\n{text}")
