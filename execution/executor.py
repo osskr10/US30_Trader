@@ -26,12 +26,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, List, Optional
+from zoneinfo import ZoneInfo
 
 from .sizing import InstrumentSpec, TradePlan, compute_trade_plan
 
 log = logging.getLogger("us30_trader.executor")
+
+# Estrategia US30 = hora NY (pineado, igual que el engine). Se usa para decidir el
+# día del candle de ENTRADA en el filtro de días bloqueados (skip_weekdays).
+_NY = ZoneInfo("America/New_York")
+_WD_NAMES = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 
 MODE_SHADOW = "shadow"
 MODE_LIVE = "live"        # también acepta 'practice' como sinónimo de live-en-demo
@@ -63,6 +69,9 @@ class ExecutorConfig:
     max_daily_loss_pct: float = 3.0
     mode: str = MODE_SHADOW
     spec: InstrumentSpec = field(default_factory=InstrumentSpec)
+    # Días (int weekday, 0=lun..6=dom) en los que NO se opera. Se evalúa sobre el día
+    # del candle de ENTRADA en hora NY. Ej: (4,) = no operar los viernes.
+    skip_weekdays: tuple = ()
 
 
 @dataclass
@@ -115,6 +124,14 @@ class Executor:
         # 1) dedup — no re-actuar sobre el mismo setup ya procesado
         if self.store.is_seen(aid):
             return skip("duplicado (ya procesado)")
+
+        # 1b) filtro de días bloqueados (p.ej. viernes). Se decide por el día del candle
+        #     de ENTRADA en hora NY: entrada abre +60min tras el open de la confirmación.
+        if self.cfg.skip_weekdays:
+            entry_open_ny = (setup.confirm_candle_open + timedelta(minutes=60)).replace(
+                tzinfo=timezone.utc).astimezone(_NY)
+            if entry_open_ny.weekday() in self.cfg.skip_weekdays:
+                return skip(f"día bloqueado ({_WD_NAMES[entry_open_ny.weekday()]}): no se opera")
 
         # 2) kill switch de pérdida diaria
         daily_loss = self._daily_loss()

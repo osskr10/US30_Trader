@@ -56,6 +56,9 @@ class TraderConfig:
     max_deal_size: float
     margin_factor: float
     price_step: float
+    # Días bloqueados (weekday int 0=lun..6=dom), evaluados sobre el candle de ENTRADA
+    # en hora NY. Ej: (4,) = no operar los viernes.
+    skip_weekdays: tuple = ()
 
     def instrument_spec(self) -> InstrumentSpec:
         return InstrumentSpec(
@@ -75,6 +78,7 @@ class TraderConfig:
             sl_buffer_points=self.sl_buffer_points,
             be_trigger_r=self.be_trigger_r,
             be_buffer_points=self.be_buffer_points,
+            skip_weekdays=self.skip_weekdays,
             max_spread_points=self.max_spread_points,
             max_concurrent_positions=self.max_concurrent_positions,
             max_daily_loss_pct=self.max_daily_loss_pct,
@@ -94,6 +98,32 @@ def _pos(value, name: str) -> float:
     if v <= 0:
         raise ConfigError(f"'{name}' debe ser > 0 (es {v})")
     return v
+
+
+_WEEKDAY_MAP = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+                "lun": 0, "mar": 1, "mié": 2, "mie": 2, "jue": 3, "vie": 4, "sáb": 5,
+                "sab": 5, "dom": 6}
+
+
+def _parse_weekdays(value) -> tuple:
+    """Convierte una lista de nombres de día (['fri'] / ['vie']) a un tuple ordenado
+    de weekday ints (0=lun..6=dom). Acepta también ints directos. [] o None → ()."""
+    if not value:
+        return ()
+    out = set()
+    for item in value:
+        if isinstance(item, int):
+            if 0 <= item <= 6:
+                out.add(item)
+            else:
+                raise ConfigError(f"execution.skip_weekdays: int fuera de rango: {item}")
+        else:
+            key = str(item).strip().lower()
+            if key not in _WEEKDAY_MAP:
+                raise ConfigError(f"execution.skip_weekdays: día inválido: {item!r} "
+                                  f"(usa mon..sun o lun..dom)")
+            out.add(_WEEKDAY_MAP[key])
+    return tuple(sorted(out))
 
 
 def parse_trader_config(raw: Dict[str, Any]) -> TraderConfig:
@@ -153,6 +183,7 @@ def parse_trader_config(raw: Dict[str, Any]) -> TraderConfig:
         max_deal_size=_pos(inst.get("max_deal_size", 500.0), "instrument.max_deal_size"),
         margin_factor=_pos(inst.get("margin_factor", 0.05), "instrument.margin_factor"),
         price_step=_pos(inst.get("price_step", 0.1), "instrument.price_step"),
+        skip_weekdays=_parse_weekdays(ex.get("skip_weekdays", [])),
     )
 
 
