@@ -30,11 +30,14 @@ log = logging.getLogger("us30_trader.breakeven")
 
 
 class BreakEvenMonitor:
-    def __init__(self, broker, store, epic: str, notifier=None):
+    def __init__(self, broker, store, epic: str, notifier=None, be_enabled: bool = True):
         self.broker = broker
         self.store = store
         self.epic = epic
         self.notifier = notifier
+        # be_enabled=False: NO se mueve el SL a breakeven a 1R (el trade corre entero
+        # a SL o TP). La detección de cierres y el keepalive de sesión siguen activos.
+        self.be_enabled = be_enabled
 
     # ------------------------------------------------------------------
     def pending(self) -> List[dict]:
@@ -55,6 +58,8 @@ class BreakEvenMonitor:
     # ------------------------------------------------------------------
     def on_price(self, bid: float, offer: float) -> List[str]:
         """Procesa un tick de precio. Devuelve los alert_id a los que se les aplicó BE."""
+        if not self.be_enabled:
+            return []
         applied: List[str] = []
         for rec in self.pending():
             direction = rec.get("direction")
@@ -233,6 +238,8 @@ class BreakEvenMonitor:
     def poll_once(self) -> List[str]:
         """Un ciclo de poll: lee el precio por REST y aplica BE si corresponde.
         Devuelve [] si no hay pendientes (evita pegarle a la API de gusto)."""
+        if not self.be_enabled:
+            return []
         if not self.pending():
             return []
         price = self.broker.current_price(self.epic)

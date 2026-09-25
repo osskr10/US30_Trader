@@ -11,7 +11,7 @@ execution:
   # Evita que un mode=live golpee la cuenta real por accidente. Cambiar a true a propósito.
   allow_live_env: false
 
-  risk_pct: 4.0              # % del balance arriesgado por trade. INTERÉS COMPUESTO:
+  risk_pct: 2.0              # % del balance arriesgado por trade. INTERÉS COMPUESTO:
                             # se recalcula sobre el balance ACTUAL en cada trade
                             # (cuenta $1200 → 1% de 1200; cuenta $700 → 1% de 700).
   rr_target: 2.0             # 1:2 (TP = entry ± 2R, sobre la distancia real de SL)
@@ -20,9 +20,9 @@ execution:
                             # El size se recalcula → el riesgo sigue siendo risk_pct exacto.
 
   break_even:
-    enabled: true
-    trigger_r: 1.0           # BE a 1:1
-    buffer_points: 5         # colchón sobre entry al mover el SL
+    enabled: false           # BE DESACTIVADO (2026-09-24, pedido del operador): el trade corre entero a SL o TP, NO se mueve a breakeven a 1R. Detección de cierres + keepalive siguen activos.
+    trigger_r: 1.0           # (inerte con enabled:false) BE a 1:1
+    buffer_points: 5         # (inerte con enabled:false) colchón sobre entry al mover el SL
 
   # Guardas
   max_spread_points: 15

@@ -111,8 +111,9 @@ def build(cfg_path: Path):
 
     exec_cfg = tcfg.executor_config()
     log.info("config: epic=%s risk_pct=%.2f%% (compuesto s/balance) rr=%.1f "
-             "sl_buffer=%.0fpts BE@%.1fR/buf=%.0f value_per_point=%.4f mode=%s",
+             "sl_buffer=%.0fpts BE=%s(@%.1fR/buf=%.0f) value_per_point=%.4f mode=%s",
              exec_cfg.epic, exec_cfg.risk_pct, exec_cfg.rr_target, exec_cfg.sl_buffer_points,
+             "ON" if tcfg.be_enabled else "OFF",
              exec_cfg.be_trigger_r, exec_cfg.be_buffer_points, exec_cfg.spec.value_per_point,
              exec_cfg.mode)
 
@@ -122,7 +123,8 @@ def build(cfg_path: Path):
     broker.login()
     store = JsonStateStore(HERE / "state" / "trader_state.json")
     executor = Executor(signal_source, broker, store, exec_cfg, notifier=notifier)
-    be_monitor = BreakEvenMonitor(broker, store, exec_cfg.epic, notifier=notifier)
+    be_monitor = BreakEvenMonitor(broker, store, exec_cfg.epic, notifier=notifier,
+                                  be_enabled=tcfg.be_enabled)
     return tcfg, signal_source, broker, store, executor, be_monitor, notifier
 
 
