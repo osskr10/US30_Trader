@@ -11,7 +11,7 @@ execution:
   # Evita que un mode=live golpee la cuenta real por accidente. Cambiar a true a propósito.
   allow_live_env: false
 
-  risk_pct: 2.0              # % del balance arriesgado por trade. INTERÉS COMPUESTO:
+  risk_pct: 5.0              # % del balance arriesgado por trade. INTERÉS COMPUESTO:
                             # se recalcula sobre el balance ACTUAL en cada trade
                             # (cuenta $1200 → 1% de 1200; cuenta $700 → 1% de 700).
   rr_target: 2.0             # 1:2 (TP = entry ± 2R, sobre la distancia real de SL)
