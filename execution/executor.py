@@ -167,6 +167,12 @@ class Executor:
         bal = self.broker.balance()
         balance = float(bal.get("balance", 0.0))
         available = float(bal.get("available", 0.0))
+        if balance <= 0 and self.notifier:
+            # El cliente ya re-logueó y releyó; si sigue en 0 es una anomalía de la cuenta/API:
+            # avisar en vez de saltear en silencio.
+            self.notifier.notify_error(
+                f"balance leído $0 (tras re-login) — entrada {direction} {self.cfg.epic} SALTEADA. "
+                f"Revisar la cuenta de Capital.com.")
         plan = compute_trade_plan(
             balance=balance, risk_pct=self.cfg.risk_pct,
             entry=setup.entry, sl=eff_sl, direction=direction,

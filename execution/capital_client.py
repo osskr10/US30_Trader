@@ -26,6 +26,10 @@ from pathlib import Path
 
 log = logging.getLogger("us30_trader.capital")
 
+# balance() leído en 0 (Capital.com, 2026-09-29): reintentos con re-login.
+_BALANCE_RETRIES = 3
+_BALANCE_RETRY_SLEEP = 2.0
+
 HOSTS = {
     "demo": "https://demo-api-capital.backend-capital.com",
     "live": "https://api-capital.backend-capital.com",
@@ -213,8 +217,28 @@ class CapitalClient:
         return accs[0]
 
     def balance(self) -> dict:
-        """Devuelve el bloque balance {balance, available, deposit, profitLoss} de la preferida."""
-        return self.preferred_account().get("balance", {})
+        """Devuelve el bloque balance {balance, available, deposit, profitLoss} de la preferida.
+
+        Si la lectura viene vacía o con balance <= 0, fuerza un re-login y relee UNA vez.
+        Motivo (2026-09-29): sesiones de larga duración devolvían balance 0 de forma
+        intermitente (una sesión nueva leía bien) y el executor salteaba entradas válidas
+        por "balance <= 0"."""
+        def _ok(b):
+            try:
+                return float(b.get("balance") or 0) > 0
+            except (TypeError, ValueError):
+                return False
+
+        bal = self.preferred_account().get("balance", {}) or {}
+        for attempt in range(1, _BALANCE_RETRIES + 1):
+            if _ok(bal):
+                break
+            log.warning("balance leído=%r → reintento %d/%d (re-login)",
+                        bal.get("balance"), attempt, _BALANCE_RETRIES)
+            time.sleep(_BALANCE_RETRY_SLEEP)
+            self.login()
+            bal = self.preferred_account().get("balance", {}) or {}
+        return bal
 
     def search_markets(self, term: str) -> list:
         return self._request("GET", f"/api/v1/markets?searchTerm={term}").get("markets", [])

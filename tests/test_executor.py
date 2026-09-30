@@ -281,3 +281,28 @@ if __name__ == "__main__":
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(tests) - failed}/{len(tests)} tests OK")
     sys.exit(1 if failed else 0)
+
+
+def test_balance_cero_avisa_por_telegram_y_saltea():
+    """Si el balance sigue en 0 tras el re-login del cliente, se saltea la entrada Y se
+    avisa (antes era silencioso: solo quedaba en el log)."""
+    class _Notif:
+        def __init__(self):
+            self.errors = []
+
+        def notify_error(self, text):
+            self.errors.append(text)
+            return True
+
+        def __getattr__(self, name):          # otros notify_* → no-op
+            return lambda *a, **k: True
+
+    n = _Notif()
+    store = InMemoryStateStore()
+    ex = Executor(FakeSignal([_long_setup()]), FakeBroker(balance=0.0, available=0.0), store,
+                  ExecutorConfig(mode=MODE_SHADOW), notifier=n,
+                  daily_loss_pct_provider=lambda: 0.0)
+    decisions = ex.process_once()
+    assert decisions and decisions[0].action == "skip"
+    assert "balance" in decisions[0].reason
+    assert n.errors and "SALTEADA" in n.errors[0]
