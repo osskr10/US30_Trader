@@ -72,6 +72,9 @@ class ExecutorConfig:
     # Días (int weekday, 0=lun..6=dom) en los que NO se opera. Se evalúa sobre el día
     # del candle de ENTRADA en hora NY. Ej: (4,) = no operar los viernes.
     skip_weekdays: tuple = ()
+    # Filtro de compresión ("volumen bajo"): si el engine marcó el setup low_volatility
+    # (ratio de rango 6/24 velas < compression_filter.min_ratio), NO se opera.
+    skip_low_volatility: bool = True
 
 
 @dataclass
@@ -132,6 +135,13 @@ class Executor:
                 tzinfo=timezone.utc).astimezone(_NY)
             if entry_open_ny.weekday() in self.cfg.skip_weekdays:
                 return skip(f"día bloqueado ({_WD_NAMES[entry_open_ny.weekday()]}): no se opera")
+
+        # 1c) filtro de compresión ("volumen bajo"): lo decide el engine (us30_alerts
+        #     compression_filter) y viene marcado en el setup validado.
+        if self.cfg.skip_low_volatility and getattr(setup, "low_volatility", False):
+            r = getattr(setup, "compression_ratio", None)
+            r_txt = f"{r:.2f}" if r is not None else "?"
+            return skip(f"volumen bajo: ratio {r_txt} < mínimo del filtro de compresión")
 
         # 2) kill switch de pérdida diaria
         daily_loss = self._daily_loss()

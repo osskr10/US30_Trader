@@ -27,6 +27,9 @@ execution:
   # Días en los que NO se opera (se evalúa el día del candle de ENTRADA en hora NY).
   # [fri] = no operar los viernes. Vacío [] = operar todos los días de la ventana.
   skip_weekdays: [fri]
+  # Filtro de compresión ("volumen bajo"): no entrar si el engine (us30_alerts,
+  # compression_filter) marcó el setup low_volatility (rango medio 6 velas < 0.5× el de 24).
+  skip_low_volatility: true
 
   # Guardas
   max_spread_points: 15

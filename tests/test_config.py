@@ -145,3 +145,14 @@ if __name__ == "__main__":
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(tests) - failed}/{len(tests)} tests OK")
     sys.exit(1 if failed else 0)
+
+
+def test_skip_low_volatility_default_true_y_override():
+    c = parse_trader_config(_base())
+    assert c.skip_low_volatility is True
+    assert c.executor_config().skip_low_volatility is True
+    raw = _base()
+    raw["execution"]["skip_low_volatility"] = False
+    c2 = parse_trader_config(raw)
+    assert c2.skip_low_volatility is False
+    assert c2.executor_config().skip_low_volatility is False

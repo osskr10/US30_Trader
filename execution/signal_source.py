@@ -44,6 +44,9 @@ class ValidatedSetup:
     instrument: str
     alert_id: str             # dedup id determinístico del engine
     confirm_candle_open: datetime
+    # Filtro de compresión ("volumen bajo") calculado por el engine en la confirmación.
+    low_volatility: bool = False
+    compression_ratio: Optional[float] = None
 
 
 _DIR_MAP = {"LONG": "BUY", "SHORT": "SELL"}
@@ -118,6 +121,8 @@ class AlertsSignalSource:
                 instrument=payload.instrument,
                 alert_id=payload.alert_id,
                 confirm_candle_open=payload.confirm_candle_open,
+                low_volatility=bool(getattr(payload, "low_volatility", False)),
+                compression_ratio=getattr(payload, "compression_ratio", None),
             ))
         return setups
 

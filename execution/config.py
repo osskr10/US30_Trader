@@ -59,6 +59,8 @@ class TraderConfig:
     # Días bloqueados (weekday int 0=lun..6=dom), evaluados sobre el candle de ENTRADA
     # en hora NY. Ej: (4,) = no operar los viernes.
     skip_weekdays: tuple = ()
+    # Saltear setups marcados low_volatility por el engine (filtro de compresión).
+    skip_low_volatility: bool = True
 
     def instrument_spec(self) -> InstrumentSpec:
         return InstrumentSpec(
@@ -79,6 +81,7 @@ class TraderConfig:
             be_trigger_r=self.be_trigger_r,
             be_buffer_points=self.be_buffer_points,
             skip_weekdays=self.skip_weekdays,
+            skip_low_volatility=self.skip_low_volatility,
             max_spread_points=self.max_spread_points,
             max_concurrent_positions=self.max_concurrent_positions,
             max_daily_loss_pct=self.max_daily_loss_pct,
@@ -184,6 +187,7 @@ def parse_trader_config(raw: Dict[str, Any]) -> TraderConfig:
         margin_factor=_pos(inst.get("margin_factor", 0.05), "instrument.margin_factor"),
         price_step=_pos(inst.get("price_step", 0.1), "instrument.price_step"),
         skip_weekdays=_parse_weekdays(ex.get("skip_weekdays", [])),
+        skip_low_volatility=bool(ex.get("skip_low_volatility", True)),
     )
 
 

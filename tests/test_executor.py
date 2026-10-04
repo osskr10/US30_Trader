@@ -32,6 +32,8 @@ class FakeSetup:
     target_r: float = 2.0
     instrument: str = "US30"
     confirm_candle_open: Optional[datetime] = None
+    low_volatility: bool = False
+    compression_ratio: Optional[float] = None
 
 
 class FakeSignal:
@@ -306,3 +308,31 @@ def test_balance_cero_avisa_por_telegram_y_saltea():
     assert decisions and decisions[0].action == "skip"
     assert "balance" in decisions[0].reason
     assert n.errors and "SALTEADA" in n.errors[0]
+
+
+# --------------------------------------------------------------------------- filtro de compresión
+def _low_vol_setup(aid="lv1", ratio=0.42):
+    s = _long_setup(aid)
+    s.low_volatility = True
+    s.compression_ratio = ratio
+    return s
+
+
+def test_volumen_bajo_saltea():
+    ex, broker, store = _mk(FakeSignal([_low_vol_setup()]), mode=MODE_LIVE)
+    d = ex.process_once()[0]
+    assert d.action == "skip"
+    assert "volumen bajo" in d.reason and "0.42" in d.reason
+    assert broker.opened == []            # NO se envía ninguna orden
+
+
+def test_volumen_bajo_con_filtro_apagado_opera():
+    ex, broker, _ = _mk(FakeSignal([_low_vol_setup()]), skip_low_volatility=False)
+    d = ex.process_once()[0]
+    assert d.action == "shadow"
+
+
+def test_volumen_normal_opera():
+    ex, broker, _ = _mk(FakeSignal([_long_setup("ok1")]))
+    d = ex.process_once()[0]
+    assert d.action == "shadow"
