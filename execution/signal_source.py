@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,12 @@ class ValidatedSetup:
 
 
 _DIR_MAP = {"LONG": "BUY", "SHORT": "SELL"}
+
+# Reuso de datos dentro del MISMO tick de validación (2026-10-08): el readiness ya
+# descarga velas 1H + diario de OANDA; el bias del log y la validación reusan esa
+# descarga en vez de pedir lo mismo 2 veces más (6 → 2 requests). Con OANDA lento
+# (8–10 s por request) eso retrasaba la entrada ~40 s.
+_SNAPSHOT_TTL_SECONDS = 60.0
 
 
 class AlertsSignalSource:
@@ -87,6 +94,22 @@ class AlertsSignalSource:
         self.evaluator = Evaluator(self.cfg, news_provider=None)
 
         self._tz = ZoneInfo(self.cfg.operating_window.timezone)
+        self._snapshot = None   # (monotonic_ts, (df_entry, forming, live_bias))
+
+    # ------------------------------------------------------------------
+    def _fetch(self, reuse: bool = False):
+        """fetch_and_prepare con reuso opcional: reuse=True devuelve la última descarga
+        si tiene <= _SNAPSHOT_TTL_SECONDS; si no (o reuse=False) descarga y la guarda."""
+        snap = self._snapshot
+        if reuse and snap is not None and time.monotonic() - snap[0] <= _SNAPSHOT_TTL_SECONDS:
+            return snap[1]
+        data = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        self._snapshot = (time.monotonic(), data)
+        return data
+
+    def invalidate_snapshot(self) -> None:
+        """Descarta la descarga guardada → la próxima lectura va fresca a OANDA."""
+        self._snapshot = None
 
     # ------------------------------------------------------------------
     def latest_validated_setups(self, now_ny: Optional[datetime] = None) -> List[ValidatedSetup]:
@@ -97,7 +120,7 @@ class AlertsSignalSource:
             now_ny = datetime.now(self._tz)
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        df_entry, _forming, live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        df_entry, _forming, live_bias = self._fetch(reuse=True)
         if df_entry is None or df_entry.empty or len(df_entry) < self.cfg.ma_length:
             return []
         # Si HOY cruzó el bias del diario, NO se opera en todo el día (bias débil).
@@ -159,7 +182,7 @@ class AlertsSignalSource:
     def last_closed_open_utc(self) -> Optional[datetime]:
         """Datetime (UTC, tz-naive) de apertura del ÚLTIMO candle 1H CERRADO que ve el
         feed (readiness). None si no hay datos."""
-        df_entry, _forming, _live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        df_entry, _forming, _live_bias = self._fetch(reuse=False)   # siempre fresco
         if df_entry is None or df_entry.empty:
             return None
         import pandas as pd  # import perezoso
@@ -167,7 +190,7 @@ class AlertsSignalSource:
 
     def current_bias(self) -> str:
         """Bias que el engine busca ahora (para logging/contexto). LONG|SHORT|NONE."""
-        df_entry, _forming, live_bias = self._bar_aggregator.fetch_and_prepare(self.ds, self.cfg)
+        df_entry, _forming, live_bias = self._fetch(reuse=True)
         if df_entry is None or df_entry.empty:
             return "NONE"
         if self.cfg.filters.live_bias and live_bias in ("LONG", "SHORT"):

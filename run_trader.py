@@ -193,6 +193,7 @@ def _wait_for_closed_candle(signal_source: AlertsSignalSource, retry_seconds: in
         if _now_utc() >= deadline:
             log.warning("readiness: la vela esperada (%s) no cerró tras %ds — valido igual",
                         expected_open.isoformat(), max_wait_seconds)
+            signal_source.invalidate_snapshot()        # validar con datos frescos, no los del intento
             return False
         _interruptible_sleep(retry_seconds, stop)
     return False
@@ -266,6 +267,8 @@ def main() -> None:
             # y current_bias es solo lectura.
             attempts, backoff = 3, 15
             for attempt in range(1, attempts + 1):
+                if attempt > 1:
+                    signal_source.invalidate_snapshot()    # reintento → datos frescos de OANDA
                 try:
                     do_validation_cycle(executor, broker, signal_source)
                     break
